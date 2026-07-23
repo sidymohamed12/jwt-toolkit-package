@@ -11,7 +11,7 @@
 
     <name>JWT Toolkit</name>
     <description>Librairie de génération/validation de JWT personnalisable (core Java pur + starter Spring Boot).</description>
-    <url>https://github.com/sidymohamed12/jwt-toolkit</url>
+    <url>https://github.com/sidymohamed12/jwt-toolkit-package</url>
 
     <licenses>
         <license>
@@ -22,7 +22,7 @@
 
     <developers>
         <developer>
-			<id>sidymohamed12</id>
+            <id>sidymohamed12</id>
 			<name>Sidy Mohamed Saizonou</name>
 			<email>mohamedsaizonou86@gmail.com</email>
 			<roles>
@@ -32,9 +32,9 @@
     </developers>
 
     <scm>
-        <url>https://github.com/sidymohamed12/jwt-toolkit</url>
-        <connection>scm:git:https://github.com/sidymohamed12/jwt-toolkit.git</connection>
-        <developerConnection>scm:git:https://github.com/sidymohamed12/jwt-toolkit.git</developerConnection>
+        <url>https://github.com/sidymohamed12/jwt-toolkit-package</url>
+        <connection>scm:git:https://github.com/sidymohamed12/jwt-toolkit-package.git</connection>
+        <developerConnection>scm:git:https://github.com/sidymohamed12/jwt-toolkit-package.git</developerConnection>
     </scm>
 
     <modules>
@@ -52,7 +52,7 @@
         <repository>
             <id>github</id>
             <name>GitHub Packages</name>
-            <url>https://maven.pkg.github.com/sidymohamed12/jwt-toolkit</url>
+            <url>https://maven.pkg.github.com/sidymohamed12/jwt-toolkit-package</url>
         </repository>
     </distributionManagement>
 
