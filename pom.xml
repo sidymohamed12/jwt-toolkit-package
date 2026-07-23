@@ -6,7 +6,7 @@
 
     <groupId>io.github.sidymohamed12</groupId>
     <artifactId>jwt-toolkit-parent</artifactId>
-    <version>1.0.0</version>
+    <version>1.0.1</version>
     <packaging>pom</packaging>
 
     <name>JWT Toolkit</name>
@@ -108,6 +108,39 @@
     </dependencyManagement>
 
     <build>
+        <plugins>
+            <!--
+                central-publishing-maven-plugin (déclaré dans le profil "release")
+                prend le contrôle de la phase "deploy" via son extension, ce qui
+                empêche le binding par défaut de maven-deploy-plugin de s'exécuter.
+                On désactive donc ce binding par défaut ("default-deploy") et on
+                le remplace par une exécution explicite ciblant GitHub Packages
+                (distributionManagement ci-dessus), pour garantir que les deux
+                publications (Central + GitHub Packages) ont bien lieu à chaque
+                "mvn deploy", profil "release" ou non.
+            -->
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-deploy-plugin</artifactId>
+                <version>3.1.4</version>
+                <executions>
+                    <execution>
+                        <id>default-deploy</id>
+                        <phase>none</phase>
+                    </execution>
+                    <execution>
+                        <id>deploy-github-packages</id>
+                        <phase>deploy</phase>
+                        <goals>
+                            <goal>deploy</goal>
+                        </goals>
+                        <configuration>
+                            <altDeploymentRepository>github::https://maven.pkg.github.com/sidymohamed12/jwt-toolkit-package</altDeploymentRepository>
+                        </configuration>
+                    </execution>
+                </executions>
+            </plugin>
+        </plugins>
         <pluginManagement>
             <plugins>
                 <plugin>
