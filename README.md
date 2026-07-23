@@ -18,14 +18,14 @@ Disponible sur **Maven Central** (aucune configuration de dépôt nécessaire) e
 <dependency>
     <groupId>io.github.sidymohamed12</groupId>
     <artifactId>jwt-core</artifactId>
-    <version>1.0.1-SNAPSHOT</version>
+    <version>1.0.2</version>
 </dependency>
 
 <!-- Projet Spring Boot (ramène jwt-core automatiquement) -->
 <dependency>
     <groupId>io.github.sidymohamed12</groupId>
     <artifactId>jwt-spring-boot-starter</artifactId>
-    <version>1.0.1-SNAPSHOT</version>
+    <version>1.0.2</version>
 </dependency>
 ```
 
@@ -35,7 +35,7 @@ Disponible sur **Maven Central** (aucune configuration de dépôt nécessaire) e
 > <repositories>
 >     <repository>
 >         <id>github</id>
->         <url>https://maven.pkg.github.com/sidymohamed12/jwt-toolkit</url>
+>         <url>https://maven.pkg.github.com/sidymohamed12/jwt-toolkit-package</url>
 >     </repository>
 > </repositories>
 > ```
@@ -168,7 +168,24 @@ Un microservice qui ne fait que **vérifier** omet `jwt.rsa.private-key` : `RsaS
 
 ## Révocation de tokens (liste noire)
 
-Par défaut : `NoOpTokenRevocationPort` (aucune révocation). Branchez votre propre implémentation, par exemple avec Redis :
+> ⚠️ **Par défaut, la librairie ne révoque aucun token.** Sans configuration
+> supplémentaire, un token signé reste valide jusqu'à sa date d'expiration
+> naturelle (`exp`) — se déconnecter, changer de mot de passe, ou appeler
+> `revoke()` n'a **aucun effet concret** tant qu'aucun `TokenRevocationPort`
+> personnalisé n'est branché. C'est un choix assumé, pas un oubli : voir
+> `NoOpTokenRevocationPortTest` et `DefaultJwtTokenServiceTest` (module
+> `jwt-core`) pour ce comportement testé et documenté noir sur blanc.
+
+Concrètement :
+
+```java
+TokenRevocationPort port = new NoOpTokenRevocationPort(); // celui utilisé par défaut
+
+port.revoke(token, Duration.ofMinutes(15)); // ne fait rien
+port.isRevoked(token);                       // toujours false, quel que soit le token
+```
+
+Si la révocation immédiate est un besoin de sécurité de votre projet (déconnexion forcée, bannissement d'un compte...), branchez votre propre implémentation, par exemple avec Redis :
 
 ```java
 @Component
@@ -196,7 +213,7 @@ public class RedisTokenRevocationPort implements TokenRevocationPort {
 }
 ```
 
-Ce bean, dès qu'il est déclaré, remplace automatiquement `NoOpTokenRevocationPort`.
+Ce bean, dès qu'il est déclaré dans votre application, remplace automatiquement `NoOpTokenRevocationPort` (grâce à `@ConditionalOnMissingBean` côté starter). Une fois branché, `jwtTokenService.parse(token)` consulte systématiquement `isRevoked(token)` avant de valider signature/expiration.
 
 ## Intégration Spring Security (optionnelle)
 

@@ -19,6 +19,7 @@ import java.util.List;
 import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatCode;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 class DefaultJwtTokenServiceTest {
@@ -125,5 +126,34 @@ class DefaultJwtTokenServiceTest {
                 .subject("user@example.com").ttl(Duration.ofMinutes(5)).build());
 
         assertThatThrownBy(() -> serviceAvecRevocation.parse(token)).isInstanceOf(JwtValidationException.class);
+    }
+
+    /**
+     * Comportement par défaut de la librairie, documenté explicitement : sans
+     * {@link TokenRevocationPort} personnalisé (ex : Redis), un token reste
+     * valide jusqu'à son expiration naturelle — "révoquer" un token n'a
+     * concrètement aucun effet. Ce n'est pas un oubli, c'est le choix
+     * assumé de {@link NoOpTokenRevocationPort} (voir sa Javadoc et la
+     * section "Révocation" du README).
+     */
+    @Test
+    void sans_revocationPort_personnalise_un_token_revoque_reste_accepte() {
+        // `service` (@BeforeEach) est déjà construit avec NoOpTokenRevocationPort,
+        // exactement comme le fait l'auto-configuration Spring Boot par défaut.
+        String token = service.generate(JwtTokenSpec.builder()
+                .subject("user@example.com").ttl(Duration.ofMinutes(15)).build());
+
+        assertThat(service.isValid(token)).isTrue();
+
+        // "Révoquer" le token ne change rien : NoOpTokenRevocationPort ignore l'appel.
+        service.parse(token); // ne lève rien avant révocation
+        assertThatCode(() -> revoke(token)).doesNotThrowAnyException();
+
+        assertThat(service.isValid(token)).isTrue();
+        assertThat(service.parse(token).subject()).isEqualTo("user@example.com");
+    }
+
+    private void revoke(String token) {
+        new NoOpTokenRevocationPort().revoke(token, Duration.ofMinutes(15));
     }
 }
