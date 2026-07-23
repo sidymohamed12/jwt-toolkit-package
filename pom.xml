@@ -4,8 +4,8 @@
          xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
     <modelVersion>4.0.0</modelVersion>
 
-    <groupId>com.sidymohamed12.jwt</groupId>
-    <artifactId>jwt-parent</artifactId>
+    <groupId>io.github.sidymohamed12</groupId>
+    <artifactId>jwt-toolkit-parent</artifactId>
     <version>1.0.0-SNAPSHOT</version>
     <packaging>pom</packaging>
 
@@ -41,6 +41,20 @@
         <module>jwt-core</module>
         <module>jwt-spring-boot-starter</module>
     </modules>
+
+    <!--
+        GitHub Packages : cible active par défaut de "mvn deploy" (pas besoin
+        du profil "release"). Nécessite un serveur "github" dans
+        ~/.m2/settings.xml (ou les secrets CI, voir release.yml) avec un
+        token GitHub possédant le scope write:packages.
+    -->
+    <distributionManagement>
+        <repository>
+            <id>github</id>
+            <name>GitHub Packages</name>
+            <url>https://maven.pkg.github.com/sidymohamed12/jwt-toolkit</url>
+        </repository>
+    </distributionManagement>
 
     <properties>
         <maven.compiler.source>17</maven.compiler.source>

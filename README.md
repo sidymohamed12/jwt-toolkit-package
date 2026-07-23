@@ -11,21 +11,36 @@ Librairie Java de génération/validation de JWT **personnalisable**, en deux mo
 
 ## Installation
 
+Disponible sur **Maven Central** (aucune configuration de dépôt nécessaire) et sur **GitHub Packages** (nécessite une authentification, même en lecture — voir note ci-dessous).
+
 ```xml
 <!-- Projet non-Spring -->
 <dependency>
-    <groupId>com.sidymohamed12.jwt</groupId>
+    <groupId>io.github.sidymohamed12</groupId>
     <artifactId>jwt-core</artifactId>
     <version>1.0.0-SNAPSHOT</version>
 </dependency>
 
 <!-- Projet Spring Boot (ramène jwt-core automatiquement) -->
 <dependency>
-    <groupId>com.sidymohamed12.jwt</groupId>
+    <groupId>io.github.sidymohamed12</groupId>
     <artifactId>jwt-spring-boot-starter</artifactId>
     <version>1.0.0-SNAPSHOT</version>
 </dependency>
 ```
+
+> **Via GitHub Packages plutôt que Maven Central ?** GitHub exige une authentification pour _toute_ consommation d'un package Maven, même public. Ajoutez dans votre `pom.xml` :
+>
+> ```xml
+> <repositories>
+>     <repository>
+>         <id>github</id>
+>         <url>https://maven.pkg.github.com/sidymohamed12/jwt-toolkit</url>
+>     </repository>
+> </repositories>
+> ```
+>
+> puis un serveur `github` dans votre `~/.m2/settings.xml` avec un token GitHub (scope `read:packages` suffit). Pour un usage "librairie partagée entre projets" sans friction, **Maven Central est recommandé** : aucune authentification requise pour la consommer.
 
 ## Démarrage rapide
 

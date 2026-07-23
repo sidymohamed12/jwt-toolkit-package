@@ -5,8 +5,8 @@
     <modelVersion>4.0.0</modelVersion>
 
     <parent>
-        <groupId>com.sidymohamed12.jwt</groupId>
-        <artifactId>jwt-parent</artifactId>
+        <groupId>io.github.sidymohamed12</groupId>
+        <artifactId>jwt-toolkit-parent</artifactId>
         <version>1.0.0-SNAPSHOT</version>
         <relativePath>../pom.xml</relativePath>
     </parent>
@@ -21,7 +21,7 @@
 
     <dependencies>
         <dependency>
-            <groupId>com.sidymohamed12.jwt</groupId>
+            <groupId>io.github.sidymohamed12</groupId>
             <artifactId>jwt-core</artifactId>
             <version>${project.version}</version>
         </dependency>
@@ -63,17 +63,22 @@
             <artifactId>jakarta.servlet-api</artifactId>
             <optional>true</optional>
         </dependency>
+        <!--
+            Même raison que jakarta.servlet-api ci-dessus : slf4j-api est une
+            dépendance transitive non propagée jusqu'ici (scope non-compile
+            plus haut dans la chaîne). Redéclarée explicitement pour que les
+            imports org.slf4j.* de JwtAuthenticationFilter compilent.
+        -->
+        <dependency>
+            <groupId>org.slf4j</groupId>
+            <artifactId>slf4j-api</artifactId>
+            <optional>true</optional>
+        </dependency>
 
         <dependency>
             <groupId>org.springframework.boot</groupId>
             <artifactId>spring-boot-starter-test</artifactId>
             <scope>test</scope>
-        </dependency>
-
-        <dependency>
-            <groupId>org.slf4j</groupId>
-            <artifactId>slf4j-api</artifactId>
-            <optional>true</optional>
         </dependency>
     </dependencies>
 </project>
