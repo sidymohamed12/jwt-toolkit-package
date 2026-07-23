@@ -1,0 +1,40 @@
+name: Release
+
+# Déclenché par un tag "v1.2.3" (cohérent avec la version du pom.xml racine).
+# Secrets requis dans Settings > Secrets and variables > Actions :
+#   CENTRAL_USERNAME / CENTRAL_PASSWORD  -> token du Central Publisher Portal (central.sonatype.com)
+#   GPG_PRIVATE_KEY                       -> clé privée GPG exportée en ASCII armor (gpg --export-secret-keys --armor)
+#   GPG_PASSPHRASE                        -> passphrase de cette clé
+on:
+  push:
+    tags:
+      - "v*.*.*"
+
+permissions:
+  contents: read
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 21
+          cache: maven
+          server-id: central
+          server-username: CENTRAL_USERNAME
+          server-password: CENTRAL_PASSWORD
+          gpg-private-key: ${{ secrets.GPG_PRIVATE_KEY }}
+          gpg-passphrase: GPG_PASSPHRASE
+
+      - name: Build, tester et publier (profil release)
+        run: mvn -B -ntp -P release clean deploy
+        env:
+          CENTRAL_USERNAME: ${{ secrets.CENTRAL_USERNAME }}
+          CENTRAL_PASSWORD: ${{ secrets.CENTRAL_PASSWORD }}
+          GPG_PASSPHRASE: ${{ secrets.GPG_PASSPHRASE }}

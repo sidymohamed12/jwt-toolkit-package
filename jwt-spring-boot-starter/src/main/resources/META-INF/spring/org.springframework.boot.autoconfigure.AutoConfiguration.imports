@@ -1,0 +1,2 @@
+com.sidymohamed12.jwt.spring.autoconfigure.JwtAutoConfiguration
+com.sidymohamed12.jwt.spring.autoconfigure.JwtSecurityAutoConfiguration

@@ -1,0 +1,79 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+
+    <parent>
+        <groupId>com.sidymohamed12.jwt</groupId>
+        <artifactId>jwt-parent</artifactId>
+        <version>1.0.0-SNAPSHOT</version>
+        <relativePath>../pom.xml</relativePath>
+    </parent>
+
+    <artifactId>jwt-spring-boot-starter</artifactId>
+    <name>JWT Spring Boot Starter</name>
+    <description>
+        Auto-configuration Spring Boot de jwt-core : zéro boilerplate pour
+        générer/valider des JWT, personnalisation via jwt.* et via des beans
+        ClaimsCustomizer / TokenRevocationPort / JwtAuthenticationConverter.
+    </description>
+
+    <dependencies>
+        <dependency>
+            <groupId>com.sidymohamed12.jwt</groupId>
+            <artifactId>jwt-core</artifactId>
+            <version>${project.version}</version>
+        </dependency>
+
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-autoconfigure</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-configuration-processor</artifactId>
+            <optional>true</optional>
+        </dependency>
+
+        <!--
+            Optionnelles : le filtre d'authentification n'est activé que si
+            Spring Security est présent sur le classpath du consommateur
+            (voir JwtSecurityAutoConfiguration, @ConditionalOnClass).
+        -->
+        <dependency>
+            <groupId>org.springframework.security</groupId>
+            <artifactId>spring-security-web</artifactId>
+            <optional>true</optional>
+        </dependency>
+        <dependency>
+            <groupId>org.springframework.security</groupId>
+            <artifactId>spring-security-core</artifactId>
+            <optional>true</optional>
+        </dependency>
+        <!--
+            spring-web (dont dépend spring-security-web) déclare jakarta.servlet-api
+            en scope "provided" — un scope non transitif en Maven. On la redéclare
+            donc ici explicitement pour que JwtAuthenticationFilter (qui étend
+            OncePerRequestFilter) compile. La version est gérée par le BOM
+            spring-boot-dependencies importé dans le pom parent.
+        -->
+        <dependency>
+            <groupId>jakarta.servlet</groupId>
+            <artifactId>jakarta.servlet-api</artifactId>
+            <optional>true</optional>
+        </dependency>
+
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-test</artifactId>
+            <scope>test</scope>
+        </dependency>
+
+        <dependency>
+            <groupId>org.slf4j</groupId>
+            <artifactId>slf4j-api</artifactId>
+            <optional>true</optional>
+        </dependency>
+    </dependencies>
+</project>
