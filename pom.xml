@@ -62,7 +62,7 @@
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
 
         <jjwt.version>0.13.0</jjwt.version>
-        <spring-boot.version>3.3.5</spring-boot.version>
+        <spring-boot.version>4.1.0</spring-boot.version>
         <junit.version>6.1.2</junit.version>
         <assertj.version>3.27.7</assertj.version>
     </properties>
