@@ -6,7 +6,7 @@
 
     <groupId>io.github.sidymohamed12</groupId>
     <artifactId>jwt-toolkit-parent</artifactId>
-    <version>1.0.1-SNAPSHOT</version>
+    <version>1.0.2</version>
     <packaging>pom</packaging>
 
     <name>JWT Toolkit</name>
