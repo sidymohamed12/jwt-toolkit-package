@@ -1,25 +1,75 @@
 # JWT Toolkit
 
-Librairie Java de génération/validation de JWT **personnalisable**, conçue pour être publiée sur Maven et réutilisée sur plusieurs projets.
+Librairie Java de génération/validation de JWT **personnalisable**, en deux modules :
 
-Deux modules, respectant le principe de Dependency Inversion (Clean Architecture) :
+| Module                    | Dépend de Spring ? | Pour qui ?                                        |
+| ------------------------- | ------------------ | ------------------------------------------------- |
+| `jwt-core`                | Non                | Tout projet Java (Spring, Quarkus, batch, CLI...) |
+| `jwt-spring-boot-starter` | Oui                | Projets Spring Boot — zéro boilerplate            |
 
-| Module | Dépend de Spring ? | Rôle |
-|---|---|---|
-| `jwt-core` | Non | Génération, validation, personnalisation des claims. Utilisable dans n'importe quelle app Java (Spring, Quarkus, batch, CLI...). |
-| `jwt-spring-boot-starter` | Oui | Auto-configuration Spring Boot (`jwt.*`), zéro boilerplate, intégration Spring Security optionnelle. |
+> Vous développez ou maintenez cette librairie ? Voir [`CONTRIBUTING.md`](CONTRIBUTING.md) (architecture, build, CI/CD, publication).
 
-## 1. Concepts clés
+## Installation
 
-### `SigningKeyProvider` — abstraction des clés (Strategy)
+```xml
+<!-- Projet non-Spring -->
+<dependency>
+    <groupId>com.sidymohamed12.jwt</groupId>
+    <artifactId>jwt-core</artifactId>
+    <version>1.0.0-SNAPSHOT</version>
+</dependency>
+
+<!-- Projet Spring Boot (ramène jwt-core automatiquement) -->
+<dependency>
+    <groupId>com.sidymohamed12.jwt</groupId>
+    <artifactId>jwt-spring-boot-starter</artifactId>
+    <version>1.0.0-SNAPSHOT</version>
+</dependency>
 ```
-HmacSigningKeyProvider   // secret partagé (HS256/384/512)
-RsaSigningKeyProvider    // paire de clés RSA (RS256/384/512)
-EcSigningKeyProvider     // paire de clés EC  (ES256/384/512)
-```
-Chaque implémentation valide la taille minimale de clé/secret à la construction et échoue tôt avec un message explicite.
 
-### `JwtTokenSpec` — personnalisation des champs
+## Démarrage rapide
+
+### Sans Spring (`jwt-core` seul)
+
+```java
+SigningKeyProvider keyProvider = new HmacSigningKeyProvider(secret, JwtAlgorithm.HS256);
+JwtTokenService jwtTokenService = new DefaultJwtTokenService(
+        keyProvider, Clock.systemUTC(), List.of(), new NoOpTokenRevocationPort());
+
+String token = jwtTokenService.generate(JwtTokenSpec.builder()
+        .subject("user@example.com")
+        .ttl(Duration.ofMinutes(15))
+        .build());
+
+JwtClaims claims = jwtTokenService.parse(token); // lève JwtValidationException si invalide
+```
+
+### Avec Spring Boot (`jwt-spring-boot-starter`)
+
+```yaml
+jwt:
+  algorithm: HS256
+  secret: ${JWT_SECRET} # >= 32 caractères pour HS256
+  access-token-ttl: PT15M
+  refresh-token-ttl: P7D
+```
+
+```java
+@Service
+public class AuthService {
+
+    private final JwtTokenService jwtTokenService; // bean déjà disponible, rien à configurer
+
+    public AuthService(JwtTokenService jwtTokenService) {
+        this.jwtTokenService = jwtTokenService;
+    }
+}
+```
+
+## Personnaliser les champs (claims)
+
+C'est le cœur de la librairie : chaque projet ajoute exactement les claims dont il a besoin, sans que `jwt-core` n'ait à les connaître à l'avance.
+
 ```java
 JwtTokenSpec spec = JwtTokenSpec.builder()
         .subject(user.getEmail())
@@ -33,8 +83,19 @@ JwtTokenSpec spec = JwtTokenSpec.builder()
 String token = jwtTokenService.generate(spec);
 ```
 
-### `ClaimsCustomizer` — claims globaux (Open/Closed)
+Lecture typée :
+
+```java
+JwtClaims claims = jwtTokenService.parse(token);
+claims.subject();
+claims.getUUID("entrepotId");
+claims.getStringSet("roles");
+```
+
+### Claims globaux automatiques (`ClaimsCustomizer`)
+
 Pour ajouter un champ à **tous** les tokens sans toucher au code appelant (ex : `issuer`, `env`) :
+
 ```java
 @Bean
 ClaimsCustomizer environmentClaimsCustomizer() {
@@ -42,14 +103,58 @@ ClaimsCustomizer environmentClaimsCustomizer() {
 }
 ```
 
-### `TokenRevocationPort` — révocation plug-able
+## Recettes : token simple vs. paire access/refresh
+
+La librairie ne fait aucune hypothèse sur votre stratégie de tokens — c'est vous qui décidez en appelant `generate()` une ou deux fois.
+
+**Token simple** (une seule durée de vie, un seul usage) :
+
 ```java
-public interface TokenRevocationPort {
-    void revoke(String token, Duration ttl);
-    boolean isRevoked(String token);
+String token = jwtTokenService.generate(JwtTokenSpec.builder()
+        .subject(user.getEmail())
+        .ttl(Duration.ofHours(1))
+        .build());
+```
+
+**Paire access + refresh** (pattern classique pour une session utilisateur longue) :
+
+```java
+String access = jwtTokenService.generate(JwtTokenSpec.builder()
+        .subject(user.getEmail()).ttl(Duration.ofMinutes(15)).build());
+
+String refresh = jwtTokenService.generate(JwtTokenSpec.builder()
+        .subject(user.getEmail()).ttl(Duration.ofDays(7))
+        .claim("type", "refresh")   // distingue le refresh d'un access token
+        .build());
+```
+
+Côté vérification, avant d'honorer une demande de rafraîchissement :
+
+```java
+JwtClaims claims = jwtTokenService.parse(refreshToken);
+if (!"refresh".equals(claims.getString("type").orElse(null))) {
+    throw new IllegalArgumentException("Ce n'est pas un refresh token.");
 }
 ```
-Par défaut : `NoOpTokenRevocationPort` (aucune révocation). Exemple de branchement Redis dans votre application :
+
+## RSA / EC — vérification par plusieurs microservices
+
+Un service central signe (clé privée), d'autres services ne font que vérifier (clé publique), sans jamais pouvoir forger de token.
+
+```yaml
+jwt:
+  algorithm: RS256
+  rsa:
+    public-key: ${JWT_RSA_PUBLIC_KEY} # Base64 X509, obligatoire
+    private-key: ${JWT_RSA_PRIVATE_KEY} # Base64 PKCS8, uniquement côté service émetteur
+```
+
+Un microservice qui ne fait que **vérifier** omet `jwt.rsa.private-key` : `RsaSigningKeyProvider` bascule automatiquement en mode vérification seule (toute tentative de signature lève une `IllegalStateException` explicite).
+
+## Révocation de tokens (liste noire)
+
+Par défaut : `NoOpTokenRevocationPort` (aucune révocation). Branchez votre propre implémentation, par exemple avec Redis :
+
 ```java
 @Component
 public class RedisTokenRevocationPort implements TokenRevocationPort {
@@ -75,56 +180,13 @@ public class RedisTokenRevocationPort implements TokenRevocationPort {
     private String sha256(String input) { /* ... */ }
 }
 ```
-Ce bean, dès qu'il est déclaré dans votre application, remplace automatiquement le `NoOpTokenRevocationPort` (`@ConditionalOnMissingBean`).
 
-### `JwtClaims` — lecture typée
-```java
-JwtClaims claims = jwtTokenService.parse(token);
-claims.subject();
-claims.getUUID("entrepotId");
-claims.getStringSet("roles");
-claims.getInstant("someTimestampClaim");
-```
+Ce bean, dès qu'il est déclaré, remplace automatiquement `NoOpTokenRevocationPort`.
 
-## 2. Utilisation — `jwt-core` seul (sans Spring)
+## Intégration Spring Security (optionnelle)
 
-```java
-SigningKeyProvider keyProvider = new HmacSigningKeyProvider(secret, JwtAlgorithm.HS256);
-JwtTokenService jwtTokenService = new DefaultJwtTokenService(
-        keyProvider, Clock.systemUTC(), List.of(), new NoOpTokenRevocationPort());
-
-String token = jwtTokenService.generate(JwtTokenSpec.builder()
-        .subject("user@example.com").ttl(Duration.ofMinutes(15)).build());
-
-JwtClaims claims = jwtTokenService.parse(token); // lève JwtValidationException si invalide
-```
-
-## 3. Utilisation — `jwt-spring-boot-starter`
-
-Ajoutez la dépendance, puis configurez :
-
-```yaml
-jwt:
-  algorithm: HS256
-  secret: ${JWT_SECRET}          # >= 32 caractères pour HS256
-  access-token-ttl: PT15M
-  refresh-token-ttl: P7D
-```
-
-Le bean `JwtTokenService` est disponible immédiatement — aucune classe de configuration à écrire.
-
-### RSA / EC (vérification par plusieurs microservices)
-```yaml
-jwt:
-  algorithm: RS256
-  rsa:
-    public-key: ${JWT_RSA_PUBLIC_KEY}     # Base64 X509, obligatoire
-    private-key: ${JWT_RSA_PRIVATE_KEY}   # Base64 PKCS8, uniquement côté service émetteur
-```
-Un microservice qui ne fait que **vérifier** les tokens omet `jwt.rsa.private-key` : `RsaSigningKeyProvider` bascule automatiquement en mode vérification seule (toute tentative de signature lève une `IllegalStateException` explicite).
-
-### Intégration Spring Security (optionnelle)
 Fournissez un `JwtAuthenticationConverter` pour activer automatiquement `JwtAuthenticationFilter` :
+
 ```java
 @Bean
 JwtAuthenticationConverter jwtAuthenticationConverter(UserDetailsService uds) {
@@ -134,7 +196,9 @@ JwtAuthenticationConverter jwtAuthenticationConverter(UserDetailsService uds) {
     };
 }
 ```
+
 Puis, dans votre `SecurityFilterChain` :
+
 ```java
 @Bean
 SecurityFilterChain securityFilterChain(HttpSecurity http, JwtAuthenticationFilter jwtFilter) throws Exception {
@@ -146,60 +210,18 @@ SecurityFilterChain securityFilterChain(HttpSecurity http, JwtAuthenticationFilt
 }
 ```
 
-## 4. Build local
+## Référence rapide des classes principales
 
-```bash
-mvn clean verify
-```
+| Classe                                                   | Rôle                                                     |
+| -------------------------------------------------------- | -------------------------------------------------------- |
+| `JwtTokenService` / `DefaultJwtTokenService`             | Générer/valider des tokens                               |
+| `JwtTokenSpec` (+ builder)                               | Décrire le token à générer (sujet, ttl, claims)          |
+| `JwtClaims`                                              | Lire les claims d'un token décodé, avec accesseurs typés |
+| `SigningKeyProvider` (Hmac/Rsa/Ec)                       | Fournir les clés de signature/vérification               |
+| `ClaimsCustomizer`                                       | Ajouter des claims à tous les tokens automatiquement     |
+| `TokenRevocationPort`                                    | Brancher une liste noire (Redis, DB...)                  |
+| `JwtAuthenticationFilter` / `JwtAuthenticationConverter` | Intégration Spring Security (starter uniquement)         |
 
-## 5. Publier sur Maven
+## Licence
 
-Deux options courantes :
-
-### Option A — GitHub Packages (le plus rapide à mettre en place)
-1. Ajoutez dans le `pom.xml` racine :
-```xml
-<distributionManagement>
-    <repository>
-        <id>github</id>
-        <url>https://maven.pkg.github.com/sidymohamed12/jwt-toolkit</url>
-    </repository>
-</distributionManagement>
-```
-2. Dans `~/.m2/settings.xml`, un serveur `github` avec un token GitHub (`write:packages`).
-3. `mvn deploy`
-4. Dans vos futurs projets, ajoutez le repository GitHub Packages et la dépendance normalement.
-
-### Option B — Maven Central (le plus universel, pas besoin de token GitHub côté consommateur)
-1. Créer un compte sur [central.sonatype.com](https://central.sonatype.com) et vérifier la propriété du `groupId` (`com.sidymohamed12` → nécessite de prouver la propriété du compte GitHub `sidymohamed12`, car ce n'est pas un nom de domaine).
-2. Générer une paire de clés GPG (`gpg --gen-key`) et la publier sur un key-server.
-3. Configurer `~/.m2/settings.xml` avec un serveur `central` (token Sonatype) et vos infos GPG.
-4. `mvn -P release clean deploy`
-5. Valider/publier le "staging repository" sur le Central Publisher Portal.
-
-> ⚠️ Le `groupId` actuel (`com.sidymohamed12.jwt`) est un point de départ à confirmer avant toute publication réelle : Maven Central exige de prouver qu'on contrôle le namespace choisi.
-
-## 6. Intégration continue (CI/CD)
-
-Deux workflows GitHub Actions sont fournis dans `.github/workflows/` :
-
-- **`ci.yml`** : à chaque push/PR sur `main`, build + tests sur Java 17 et 21 (matrice), publication des rapports de tests. C'est ici — pas dans ce sandbox, qui n'a pas accès à Maven Central — que la compilation est réellement vérifiée en continu.
-- **`release.yml`** : déclenché par un tag `vX.Y.Z` poussé sur le dépôt. Construit, signe (GPG) et publie sur Maven Central via le profil `release` (`central-publishing-maven-plugin`).
-
-Secrets GitHub requis pour `release.yml` (`Settings > Secrets and variables > Actions`) :
-
-| Secret | Origine |
-|---|---|
-| `CENTRAL_USERNAME` / `CENTRAL_PASSWORD` | Token généré sur [central.sonatype.com](https://central.sonatype.com) (Account > Generate User Token) |
-| `GPG_PRIVATE_KEY` | `gpg --export-secret-keys --armor <votre-id>` |
-| `GPG_PASSPHRASE` | Passphrase de cette clé GPG |
-
-Un `dependabot.yml` maintient également les dépendances Maven et les actions GitHub à jour chaque semaine.
-
-**Pour publier une version** : mettez à jour `<version>` dans les 3 `pom.xml` (racine + 2 modules), committez, taguez (`git tag v1.0.0 && git push --tags`) — le workflow `release.yml` s'occupe du reste.
-
-## 7. Prochaines étapes suggérées
-
-- Ajouter le `flatten-maven-plugin` si vous voulez un versioning CI-friendly (`${revision}`), pour éviter d'éditer 3 fichiers à chaque release.
-- Ajouter un module `jwt-quarkus-extension` si un projet futur utilise Quarkus — `jwt-core` est déjà prêt pour ça, aucune dépendance à changer.
-- Une fois le dépôt GitHub créé, lancer `mvn clean verify` en local (ou laisser `ci.yml` le faire) pour la toute première vérification de compilation réelle.
+MIT — voir [`LICENSE`](LICENSE).
