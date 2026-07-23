@@ -18,14 +18,14 @@ Disponible sur **Maven Central** (aucune configuration de dépôt nécessaire) e
 <dependency>
     <groupId>io.github.sidymohamed12</groupId>
     <artifactId>jwt-core</artifactId>
-    <version>1.0.0-SNAPSHOT</version>
+    <version>1.0.1-SNAPSHOT</version>
 </dependency>
 
 <!-- Projet Spring Boot (ramène jwt-core automatiquement) -->
 <dependency>
     <groupId>io.github.sidymohamed12</groupId>
     <artifactId>jwt-spring-boot-starter</artifactId>
-    <version>1.0.0-SNAPSHOT</version>
+    <version>1.0.1-SNAPSHOT</version>
 </dependency>
 ```
 

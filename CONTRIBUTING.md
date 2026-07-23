@@ -136,17 +136,17 @@ Dans `Settings > Secrets and variables > Actions` du dépôt :
 ### 5.4 Publier une version
 
 ```bash
-# 1. Mettre à jour <version> dans les 3 pom.xml (racine + 2 modules) : 1.0.0-SNAPSHOT -> 1.0.0
+# 1. Mettre à jour <version> dans les 3 pom.xml (racine + 2 modules) : 1.0.1-SNAPSHOT -> 1.0.1
 # 2. Committer
 git add .
-git commit -m "Release 1.0.0"
+git commit -m "Release 1.0.1"
 
 # 3. Taguer et pousser
-git tag v1.0.0
+git tag v1.0.1
 git push origin main --tags
 ```
 
-Le tag `v1.0.0` déclenche `release.yml`, qui build, teste, signe et publie vers les deux dépôts. Suivre la progression dans l'onglet **Actions** du dépôt GitHub.
+Le tag `v1.0.1` déclenche `release.yml`, qui build, teste, signe et publie vers les deux dépôts. Suivre la progression dans l'onglet **Actions** du dépôt GitHub.
 
 **Après publication sur Central** : les artefacts apparaissent d'abord dans le _staging repository_ du Central Publisher Portal. Avec `autoPublish=false` (configuré dans `pom.xml`), une validation manuelle est nécessaire : se connecter sur [central.sonatype.com](https://central.sonatype.com), onglet `Deployments`, vérifier que tout est vert, puis cliquer `Publish`. Repassez `autoPublish` à `true` dans le `pom.xml` une fois confiant dans le pipeline, pour publier automatiquement sans étape manuelle.
 
