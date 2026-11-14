@@ -6,6 +6,7 @@ import com.sidymohamed12.jwt.core.key.EcSigningKeyProvider;
 import com.sidymohamed12.jwt.core.key.HmacSigningKeyProvider;
 import com.sidymohamed12.jwt.core.key.RsaSigningKeyProvider;
 import com.sidymohamed12.jwt.core.key.SigningKeyProvider;
+import com.sidymohamed12.jwt.core.key.SigningKeyRing;
 import com.sidymohamed12.jwt.core.revocation.NoOpTokenRevocationPort;
 import com.sidymohamed12.jwt.core.revocation.TokenRevocationPort;
 import com.sidymohamed12.jwt.core.token.DefaultJwtTokenService;
@@ -29,8 +30,11 @@ import java.util.List;
  * toucher à cette classe ni forker la librairie (principe Open/Closed).
  */
 @AutoConfiguration
-@EnableConfigurationProperties(JwtProperties.class)
+@EnableConfigurationProperties({ JwtProperties.class, JwtKeyRotationProperties.class })
 public class JwtAutoConfiguration {
+
+    private static final String REQUIRED_FOR = " est obligatoire pour l'algorithme ";
+    private static final String PUBLIC_KEY = "public-key";
 
     /**
      * @return une horloge système UTC, sauf si l'application en fournit déjà une
@@ -68,32 +72,77 @@ public class JwtAutoConfiguration {
     public SigningKeyProvider signingKeyProvider(JwtProperties properties) {
         JwtAlgorithm algorithm = properties.algorithm();
         return switch (algorithm.family()) {
-            case HMAC -> {
-                if (properties.secret() == null || properties.secret().isBlank()) {
-                    throw new IllegalStateException(
-                            "jwt.secret est obligatoire pour l'algorithme " + algorithm);
-                }
-                yield new HmacSigningKeyProvider(properties.secret(), algorithm);
-            }
+            case HMAC -> hmacProvider(properties.secret(), algorithm, "jwt.secret");
             case RSA -> {
-                if (properties.rsa() == null || properties.rsa().publicKey() == null) {
-                    throw new IllegalStateException(
-                            "jwt.rsa.public-key est obligatoire pour l'algorithme " + algorithm
-                                    + " (jwt.rsa.private-key en plus côté service émetteur)");
-                }
-                yield RsaSigningKeyProvider.fromBase64(
-                        properties.rsa().privateKey(), properties.rsa().publicKey(), algorithm);
+                JwtProperties.Rsa rsa = properties.rsa() != null ? properties.rsa() : new JwtProperties.Rsa(null, null);
+                requirePublicKey(rsa.publicKey(), algorithm, "jwt.rsa.");
+                yield RsaSigningKeyProvider.fromBase64(rsa.privateKey(), rsa.publicKey(), algorithm);
             }
             case EC -> {
-                if (properties.ec() == null || properties.ec().publicKey() == null) {
-                    throw new IllegalStateException(
-                            "jwt.ec.public-key est obligatoire pour l'algorithme " + algorithm
-                                    + " (jwt.ec.private-key en plus côté service émetteur)");
-                }
-                yield EcSigningKeyProvider.fromBase64(
-                        properties.ec().privateKey(), properties.ec().publicKey(), algorithm);
+                JwtProperties.Ec ec = properties.ec() != null ? properties.ec() : new JwtProperties.Ec(null, null);
+                requirePublicKey(ec.publicKey(), algorithm, "jwt.ec.");
+                yield EcSigningKeyProvider.fromBase64(ec.privateKey(), ec.publicKey(), algorithm);
             }
         };
+    }
+
+    /**
+     * Construit le trousseau de clés : la clé active est le
+     * {@link SigningKeyProvider} (identifiée par {@code jwt.rotation.active-key-id}
+     * si renseigné), complétée des clés précédentes
+     * {@code jwt.rotation.previous-keys}, en vérification seule.
+     *
+     * @throws IllegalStateException    si une clé précédente est incomplète, ou si
+     *                                  des clés précédentes sont déclarées sans
+     *                                  {@code active-key-id}
+     * @throws IllegalArgumentException si un {@code kid} est vide ou dupliqué
+     */
+    @Bean
+    @ConditionalOnMissingBean
+    public SigningKeyRing signingKeyRing(SigningKeyProvider signingKeyProvider, JwtProperties properties,
+            JwtKeyRotationProperties rotation) {
+        SigningKeyRing.Builder builder = SigningKeyRing.builder();
+        String activeKeyId = rotation.activeKeyId();
+        if (activeKeyId == null || activeKeyId.isBlank()) {
+            builder.active(signingKeyProvider);
+        } else {
+            builder.active(activeKeyId, signingKeyProvider);
+        }
+        for (JwtKeyRotationProperties.PreviousKey previous : rotation.previousKeys()) {
+            JwtAlgorithm algorithm = previous.algorithm() != null ? previous.algorithm() : properties.algorithm();
+            builder.previous(previous.keyId(), verificationProvider(previous, algorithm));
+        }
+        return builder.build();
+    }
+
+    /** Construit une clé précédente, en vérification seule. */
+    private static SigningKeyProvider verificationProvider(JwtKeyRotationProperties.PreviousKey previous,
+            JwtAlgorithm algorithm) {
+        String prefix = "jwt.rotation.previous-keys[" + previous.keyId() + "].";
+        return switch (algorithm.family()) {
+            case HMAC -> hmacProvider(previous.secret(), algorithm, prefix + "secret");
+            case RSA -> {
+                requirePublicKey(previous.publicKey(), algorithm, prefix);
+                yield RsaSigningKeyProvider.fromBase64(null, previous.publicKey(), algorithm);
+            }
+            case EC -> {
+                requirePublicKey(previous.publicKey(), algorithm, prefix);
+                yield EcSigningKeyProvider.fromBase64(null, previous.publicKey(), algorithm);
+            }
+        };
+    }
+
+    private static HmacSigningKeyProvider hmacProvider(String secret, JwtAlgorithm algorithm, String property) {
+        if (secret == null || secret.isBlank()) {
+            throw new IllegalStateException(property + REQUIRED_FOR + algorithm);
+        }
+        return new HmacSigningKeyProvider(secret, algorithm);
+    }
+
+    private static void requirePublicKey(String publicKey, JwtAlgorithm algorithm, String prefix) {
+        if (publicKey == null || publicKey.isBlank()) {
+            throw new IllegalStateException(prefix + PUBLIC_KEY + REQUIRED_FOR + algorithm);
+        }
     }
 
     /**
@@ -105,9 +154,9 @@ public class JwtAutoConfiguration {
      */
     @Bean
     @ConditionalOnMissingBean
-    public JwtTokenService jwtTokenService(SigningKeyProvider signingKeyProvider, Clock jwtClock,
+    public JwtTokenService jwtTokenService(SigningKeyRing signingKeyRing, Clock jwtClock,
             ObjectProvider<ClaimsCustomizer> claimsCustomizers, TokenRevocationPort tokenRevocationPort) {
         List<ClaimsCustomizer> customizers = claimsCustomizers.orderedStream().toList();
-        return new DefaultJwtTokenService(signingKeyProvider, jwtClock, customizers, tokenRevocationPort);
+        return new DefaultJwtTokenService(signingKeyRing, jwtClock, customizers, tokenRevocationPort);
     }
 }

@@ -19,7 +19,7 @@ jwt-toolkit/                    (pom parent — packaging "pom", pas de code)
 | Package      | Contenu                                                                                             |
 | ------------ | --------------------------------------------------------------------------------------------------- |
 | `algorithm`  | `JwtAlgorithm` — métadonnées des algorithmes (famille, taille de clé min.)                          |
-| `key`        | `SigningKeyProvider` (Strategy) + implémentations Hmac/Rsa/Ec                                       |
+| `key`        | `SigningKeyProvider` (Strategy) + implémentations Hmac/Rsa/Ec, `SigningKeyRing` (rotation par `kid`)                                       |
 | `claims`     | `JwtClaims` (lecture typée), `JwtClaimsBuilder`, `ClaimsCustomizer` (point d'extension Open/Closed) |
 | `token`      | `JwtTokenSpec` (builder), `JwtTokenService` (port) + `DefaultJwtTokenService` (impl jjwt)           |
 | `revocation` | `TokenRevocationPort` (port) + `NoOpTokenRevocationPort` (implémentation par défaut)                |
@@ -31,7 +31,7 @@ jwt-toolkit/                    (pom parent — packaging "pom", pas de code)
 
 | Package         | Contenu                                                                                           |
 | --------------- | ------------------------------------------------------------------------------------------------- |
-| `autoconfigure` | `JwtProperties` (`jwt.*`), `JwtAutoConfiguration`, `JwtSecurityAutoConfiguration`                 |
+| `autoconfigure` | `JwtProperties` (`jwt.*`), `JwtKeyRotationProperties` (`jwt.rotation.*`), `JwtAutoConfiguration`, `JwtSecurityAutoConfiguration`                 |
 | `security`      | `JwtAuthenticationFilter`, `JwtAuthenticationConverter` (intégration Spring Security optionnelle) |
 
 Chaque bean d'auto-configuration est `@ConditionalOnMissingBean` : un consommateur peut remplacer n'importe quelle pièce (provider de clé, révocation, horloge) sans forker la librairie.

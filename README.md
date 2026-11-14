@@ -18,14 +18,14 @@ Disponible sur **Maven Central** (aucune configuration de dépôt nécessaire) e
 <dependency>
     <groupId>io.github.sidymohamed12</groupId>
     <artifactId>jwt-core</artifactId>
-    <version>1.0.3</version>
+    <version>1.1.0</version>
 </dependency>
 
 <!-- Projet Spring Boot (ramène jwt-core automatiquement) -->
 <dependency>
     <groupId>io.github.sidymohamed12</groupId>
     <artifactId>jwt-spring-boot-starter</artifactId>
-    <version>1.0.3</version>
+    <version>1.1.0</version>
 </dependency>
 ```
 
@@ -166,6 +166,58 @@ jwt:
 
 Un microservice qui ne fait que **vérifier** omet `jwt.rsa.private-key` : `RsaSigningKeyProvider` bascule automatiquement en mode vérification seule (toute tentative de signature lève une `IllegalStateException` explicite).
 
+## Algorithme strict
+
+L'algorithme configuré (`jwt.algorithm`) est imposé **des deux côtés** :
+
+- **à la signature** : le token est toujours signé avec l'algorithme configuré, jamais avec un algorithme déduit de la taille de la clé (un secret de 48 octets configuré en `HS256` produit bien un token `HS256`, pas `HS384`) ;
+- **à la validation** : l'en-tête `alg` du token doit être **exactement** cet algorithme. Un token `HS512` est refusé par un service `HS256`, un token `RS512` par un service `RS256`, et un token HMAC par un service RSA/EC (attaque « algorithm confusion »). Les tokens non signés (`alg: none`) sont toujours refusés.
+
+> **Mise à jour depuis 1.0.x** : si votre secret HMAC est plus long que le minimum de l'algorithme configuré (ex. 48 octets en `HS256`), les versions 1.0.x signaient en réalité avec un algorithme plus fort (`HS384`). Ces tokens sont refusés à partir de 1.1.0 : les utilisateurs concernés devront se reconnecter une fois.
+
+## Rotation des clés (`kid`)
+
+Changer de clé sans déconnecter tout le monde : la clé **active** signe les nouveaux tokens (son identifiant est écrit dans l'en-tête `kid`), les clés **précédentes** ne servent qu'à vérifier les tokens encore en circulation.
+
+```yaml
+jwt:
+  algorithm: HS256
+  secret: ${JWT_SECRET} # clé active
+  rotation:
+    active-key-id: "2026-11"
+    previous-keys:
+      - key-id: "2026-10"
+        secret: ${JWT_SECRET_PREVIOUS} # vérification seule
+      # RSA/EC : public-key à la place de secret ; algorithm optionnel (défaut : jwt.algorithm)
+```
+
+Règles de vérification :
+
+| Token reçu                         | Clé utilisée                                  |
+| ---------------------------------- | --------------------------------------------- |
+| `kid` de la clé active ou précédente | cette clé (avec **son** algorithme, strict) |
+| sans `kid`                         | la clé active                                 |
+| `kid` inconnu                      | aucune → token refusé                         |
+
+Sans `jwt.rotation`, le comportement est celui de la version 1.0.x : une seule clé, pas de `kid`.
+
+**Procédure de rotation recommandée**
+
+1. **Une seule fois**, si vos tokens actuels n'ont pas de `kid` : donnez un identifiant à la clé actuelle (`active-key-id: "2026-10"`, même secret) et déployez. Attendez la durée de vie d'un refresh token (7 jours par défaut) pour que tous les tokens en circulation portent ce `kid`.
+2. Mettez la nouvelle clé dans `jwt.secret`, changez `active-key-id`, et déplacez l'ancienne clé dans `previous-keys`. Déployez.
+3. Après la durée de vie d'un refresh token, retirez l'ancienne clé de `previous-keys`.
+
+Sans Spring :
+
+```java
+SigningKeyRing ring = SigningKeyRing.builder()
+        .active("2026-11", new HmacSigningKeyProvider(newSecret, JwtAlgorithm.HS256))
+        .previous("2026-10", new HmacSigningKeyProvider(oldSecret, JwtAlgorithm.HS256))
+        .build();
+
+JwtTokenService service = new DefaultJwtTokenService(ring, Clock.systemUTC(), List.of(), null);
+```
+
 ## Révocation de tokens (liste noire)
 
 > ⚠️ **Par défaut, la librairie ne révoque aucun token.** Sans configuration
@@ -250,6 +302,7 @@ SecurityFilterChain securityFilterChain(HttpSecurity http, JwtAuthenticationFilt
 | `JwtTokenSpec` (+ builder)                               | Décrire le token à générer (sujet, ttl, claims)          |
 | `JwtClaims`                                              | Lire les claims d'un token décodé, avec accesseurs typés |
 | `SigningKeyProvider` (Hmac/Rsa/Ec)                       | Fournir les clés de signature/vérification               |
+| `SigningKeyRing`                                         | Rotation : clé active + clés précédentes, par `kid`      |
 | `ClaimsCustomizer`                                       | Ajouter des claims à tous les tokens automatiquement     |
 | `TokenRevocationPort`                                    | Brancher une liste noire (Redis, DB...)                  |
 | `JwtAuthenticationFilter` / `JwtAuthenticationConverter` | Intégration Spring Security (starter uniquement)         |

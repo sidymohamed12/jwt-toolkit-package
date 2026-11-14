@@ -1,5 +1,6 @@
 package com.sidymohamed12.jwt.core.token;
 
+import com.sidymohamed12.jwt.core.algorithm.JwtAlgorithm;
 import com.sidymohamed12.jwt.core.claims.ClaimsCustomizer;
 import com.sidymohamed12.jwt.core.claims.JwtClaims;
 import com.sidymohamed12.jwt.core.claims.JwtClaimsBuilder;
@@ -7,16 +8,24 @@ import com.sidymohamed12.jwt.core.exception.JwtExpiredException;
 import com.sidymohamed12.jwt.core.exception.JwtGenerationException;
 import com.sidymohamed12.jwt.core.exception.JwtValidationException;
 import com.sidymohamed12.jwt.core.key.SigningKeyProvider;
+import com.sidymohamed12.jwt.core.key.SigningKeyRing;
 import com.sidymohamed12.jwt.core.revocation.TokenRevocationPort;
 
 import io.jsonwebtoken.Claims;
 import io.jsonwebtoken.ExpiredJwtException;
+import io.jsonwebtoken.JwsHeader;
+import io.jsonwebtoken.JwtBuilder;
 import io.jsonwebtoken.JwtException;
-import io.jsonwebtoken.JwtParserBuilder;
+import io.jsonwebtoken.JwtParser;
 import io.jsonwebtoken.Jwts;
+import io.jsonwebtoken.LocatorAdapter;
+import io.jsonwebtoken.UnsupportedJwtException;
+import io.jsonwebtoken.security.MacAlgorithm;
+import io.jsonwebtoken.security.SignatureAlgorithm;
 
 import javax.crypto.SecretKey;
 import java.security.Key;
+import java.security.PrivateKey;
 import java.security.PublicKey;
 import java.time.Clock;
 import java.time.Instant;
@@ -24,6 +33,7 @@ import java.util.Date;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 
 /**
  * Implémentation par défaut de {@link JwtTokenService}, basée sur
@@ -34,10 +44,27 @@ import java.util.Map;
  * sont ceux de la librairie, jamais ceux de jjwt (Dependency Inversion /
  * anti-corruption layer). Remplacer jjwt par une autre implémentation JWT
  * à l'avenir n'impacterait donc aucun code consommateur.
+ *
+ * <h2>Algorithme strict</h2>
+ * À la génération, le token est toujours signé avec l'algorithme
+ * <strong>configuré</strong> ({@link SigningKeyProvider#algorithm()}), jamais
+ * avec un algorithme déduit de la taille de la clé. À la validation, l'en-tête
+ * {@code alg} du token doit être <strong>exactement</strong> l'algorithme de la
+ * clé désignée : un token HS512 est refusé par un service HS256, un token RS512
+ * par un service RS256, un token HMAC par un service RSA/EC, etc.
+ *
+ * <h2>Rotation des clés</h2>
+ * Construit avec un {@link SigningKeyRing}, le service signe avec la clé active
+ * (son {@code kid} est écrit dans l'en-tête) et vérifie chaque token avec la
+ * clé désignée par son {@code kid} : les tokens émis avant une rotation restent
+ * valides jusqu'à leur expiration, tant que l'ancienne clé est déclarée comme
+ * clé précédente.
  */
 public final class DefaultJwtTokenService implements JwtTokenService {
 
-    private final SigningKeyProvider signingKeyProvider;
+    private static final String NOT_SUPPORTED = "Algorithme non supporté : ";
+
+    private final SigningKeyRing keyRing;
     private final Clock clock;
     private final List<ClaimsCustomizer> claimsCustomizers;
     private final TokenRevocationPort revocationPort;
@@ -57,7 +84,22 @@ public final class DefaultJwtTokenService implements JwtTokenService {
      */
     public DefaultJwtTokenService(SigningKeyProvider signingKeyProvider, Clock clock,
             List<ClaimsCustomizer> claimsCustomizers, TokenRevocationPort revocationPort) {
-        this.signingKeyProvider = signingKeyProvider;
+        this(SigningKeyRing.of(signingKeyProvider), clock, claimsCustomizers, revocationPort);
+    }
+
+    /**
+     * Variante avec rotation de clés.
+     *
+     * @param keyRing           clé active (signature) et clés précédentes
+     *                          (vérification seule), indexées par {@code kid}
+     * @param clock             voir
+     *                          {@link #DefaultJwtTokenService(SigningKeyProvider, Clock, List, TokenRevocationPort)}
+     * @param claimsCustomizers idem
+     * @param revocationPort    idem
+     */
+    public DefaultJwtTokenService(SigningKeyRing keyRing, Clock clock,
+            List<ClaimsCustomizer> claimsCustomizers, TokenRevocationPort revocationPort) {
+        this.keyRing = Objects.requireNonNull(keyRing, "keyRing ne peut pas être null");
         this.clock = clock;
         this.claimsCustomizers = claimsCustomizers == null ? List.of() : List.copyOf(claimsCustomizers);
         this.revocationPort = revocationPort;
@@ -92,8 +134,9 @@ public final class DefaultJwtTokenService implements JwtTokenService {
             if (spec.tokenId() != null) {
                 jwtBuilder.id(spec.tokenId());
             }
+            keyRing.activeKeyId().ifPresent(kid -> jwtBuilder.header().keyId(kid).and());
 
-            return jwtBuilder.signWith(signingKeyProvider.signingKey()).compact();
+            return sign(jwtBuilder, keyRing.active()).compact();
         } catch (RuntimeException e) {
             throw new JwtGenerationException("Échec de génération du JWT : " + e.getMessage(), e);
         }
@@ -112,7 +155,7 @@ public final class DefaultJwtTokenService implements JwtTokenService {
             throw new JwtValidationException("Token révoqué.");
         }
         try {
-            Claims claims = parserBuilder().build().parseSignedClaims(token).getPayload();
+            Claims claims = parser().parseSignedClaims(token).getPayload();
             return toJwtClaims(claims);
         } catch (ExpiredJwtException e) {
             throw new JwtExpiredException("Token expiré.", e);
@@ -134,7 +177,7 @@ public final class DefaultJwtTokenService implements JwtTokenService {
     @Override
     public boolean isExpired(String token) {
         try {
-            parserBuilder().build().parseSignedClaims(token);
+            parser().parseSignedClaims(token);
             return false;
         } catch (ExpiredJwtException e) {
             return true;
@@ -146,26 +189,92 @@ public final class DefaultJwtTokenService implements JwtTokenService {
     }
 
     /**
-     * Construit un parseur jjwt configuré avec l'horloge et la bonne clé de
-     * vérification
-     * (secret HMAC ou clé publique RSA/EC, selon le type retourné par le
-     * {@link SigningKeyProvider}).
-     *
-     * @throws IllegalStateException si le type de clé retourné par le provider
-     *                               n'est ni
-     *                               {@link SecretKey} ni {@link PublicKey}
+     * Signe avec l'algorithme <strong>explicitement</strong> configuré sur la clé
+     * (sans cela, jjwt choisirait l'algorithme d'après la taille de la clé : un
+     * secret de 48 octets configuré en HS256 produirait un token HS384).
      */
-    private JwtParserBuilder parserBuilder() {
-        JwtParserBuilder builder = Jwts.parser().clock(() -> Date.from(Instant.now(clock)));
-        Key key = signingKeyProvider.verificationKey();
-        if (key instanceof SecretKey secretKey) {
-            builder.verifyWith(secretKey);
-        } else if (key instanceof PublicKey publicKey) {
-            builder.verifyWith(publicKey);
-        } else {
+    private static JwtBuilder sign(JwtBuilder builder, SigningKeyProvider provider) {
+        JwtAlgorithm algorithm = provider.algorithm();
+        Key key = provider.signingKey();
+        if (algorithm.isHmac() && key instanceof SecretKey secretKey) {
+            return builder.signWith(secretKey, macAlgorithm(algorithm));
+        }
+        if (algorithm.isAsymmetric() && key instanceof PrivateKey privateKey) {
+            return builder.signWith(privateKey, signatureAlgorithm(algorithm));
+        }
+        throw new IllegalStateException(
+                "Clé de signature incompatible avec l'algorithme " + algorithm + " : " + key.getClass());
+    }
+
+    private static MacAlgorithm macAlgorithm(JwtAlgorithm algorithm) {
+        return switch (algorithm) {
+            case HS256 -> Jwts.SIG.HS256;
+            case HS384 -> Jwts.SIG.HS384;
+            case HS512 -> Jwts.SIG.HS512;
+            default -> throw new IllegalArgumentException(NOT_SUPPORTED + algorithm);
+        };
+    }
+
+    private static SignatureAlgorithm signatureAlgorithm(JwtAlgorithm algorithm) {
+        return switch (algorithm) {
+            case RS256 -> Jwts.SIG.RS256;
+            case RS384 -> Jwts.SIG.RS384;
+            case RS512 -> Jwts.SIG.RS512;
+            case ES256 -> Jwts.SIG.ES256;
+            case ES384 -> Jwts.SIG.ES384;
+            case ES512 -> Jwts.SIG.ES512;
+            default -> throw new IllegalArgumentException(NOT_SUPPORTED + algorithm);
+        };
+    }
+
+    /**
+     * Construit un parseur jjwt dont la clé de vérification est choisie par
+     * {@link StrictKeyLocator} (lookup par {@code kid} + algorithme strict).
+     */
+    private JwtParser parser() {
+        return Jwts.parser()
+                .clock(() -> Date.from(Instant.now(clock)))
+                .keyLocator(new StrictKeyLocator(keyRing))
+                .build();
+    }
+
+    /**
+     * Choisit la clé de vérification d'un token signé :
+     * <ol>
+     * <li>résolution de la clé via le {@code kid} de l'en-tête
+     * ({@link SigningKeyRing#find(String)}) ;</li>
+     * <li>refus si l'en-tête {@code alg} n'est pas exactement l'algorithme
+     * configuré pour cette clé.</li>
+     * </ol>
+     * Les refus lèvent {@link UnsupportedJwtException}, converti en
+     * {@link JwtValidationException} par {@link #parse(String)}.
+     */
+    private static final class StrictKeyLocator extends LocatorAdapter<Key> {
+
+        private final SigningKeyRing keyRing;
+
+        private StrictKeyLocator(SigningKeyRing keyRing) {
+            this.keyRing = keyRing;
+        }
+
+        @Override
+        protected Key locate(JwsHeader header) {
+            String keyId = header.getKeyId();
+            SigningKeyProvider provider = keyRing.find(keyId)
+                    .orElseThrow(() -> new UnsupportedJwtException("Identifiant de clé (kid) inconnu : " + keyId));
+
+            String expected = provider.algorithm().name();
+            if (!expected.equals(header.getAlgorithm())) {
+                throw new UnsupportedJwtException(
+                        "Algorithme refusé : " + header.getAlgorithm() + " (attendu : " + expected + ").");
+            }
+
+            Key key = provider.verificationKey();
+            if (key instanceof SecretKey || key instanceof PublicKey) {
+                return key;
+            }
             throw new IllegalStateException("Type de clé de vérification non supporté : " + key.getClass());
         }
-        return builder;
     }
 
     /**
